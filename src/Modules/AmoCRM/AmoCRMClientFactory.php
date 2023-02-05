@@ -18,7 +18,7 @@ class AmoCRMClientFactory
             ->onAccessTokenRefresh(
                 function (AccessTokenInterface $accessToken, string $baseDomain) {
                     file_put_contents(
-                        base_path('amocrm_token.json'),
+                        config('amocrm.token_path'),
                         json_encode([
                             'access_token' => $accessToken->getToken(),
                             'refresh_token' => $accessToken->getRefreshToken(),
