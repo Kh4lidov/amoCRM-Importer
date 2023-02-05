@@ -3,13 +3,12 @@
 namespace App\Console\Commands;
 
 use AmoCRM\Models\LeadModel;
-use App\Models\Company;
-use App\Models\Lead;
-use Carbon\CarbonImmutable;
+use App\Repository\CompanyRepository;
+use App\Repository\LeadRepository;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Modules\AmoCRM\AmoCRMClientFactory;
 use Illuminate\Console\Command;
+use Modules\AmoCRM\EntityService;
 
 class AmoCRMImportLeads extends Command
 {
@@ -27,8 +26,11 @@ class AmoCRMImportLeads extends Command
      */
     protected $description = 'Import all leads from AmoCRM';
 
-    public function handle()
-    {
+    public function handle(
+        CompanyRepository $companyRepository,
+        LeadRepository $leadRepository,
+        EntityService $entityService
+    ) {
         $client = AmoCRMClientFactory::getClient();
 
         $leadsService = $client->leads();
@@ -54,17 +56,12 @@ class AmoCRMImportLeads extends Command
 
             /** @var LeadModel $lead */
             foreach ($leads as $lead) {
-                $company = $client->companies()->getOne($lead->getCompany()->getId());
-                $companyData = $this->filterModelFields($company->toArray(), Company::FILLABLE_FIELDS);
-                $companyData = $this->convertTimestamps($companyData);
+                DB::transaction(function () use($companyRepository, $leadRepository, $entityService, $lead, $bar) {
+                    $company = $entityService->createCompanyFromCompanyModel($lead->getCompany());
+                    $lead = $entityService->createLeadFromLeadModel($lead);
 
-                $leadData = $this->filterModelFields($lead->toArray(), Lead::FILLABLE_FIELDS);
-                $leadData = $this->convertTimestamps($leadData);
-                $leadData['company_id'] = $company->getId();
-
-                DB::transaction(function () use($leadData, $companyData, $bar) {
-                    Company::updateOrCreate(['id' => $companyData['id']], $companyData);
-                    Lead::updateOrCreate(['id' => $leadData['id']], $leadData);
+                    $companyRepository->updateOrCreate($company);
+                    $leadRepository->updateOrCreate($lead);
 
                     $bar->advance();
                 });
@@ -74,19 +71,5 @@ class AmoCRMImportLeads extends Command
                 break;
             }
         }
-    }
-
-    private function filterModelFields(array $data, array $keys): array {
-        return array_filter($data, fn($item, $key) => in_array($key, $keys), ARRAY_FILTER_USE_BOTH);
-    }
-
-    private function convertTimestamps(array $data): array {
-        foreach ($data as $key => $property) {
-            if (Str::endsWith($key, '_at') && $property !== null) {
-                $data[$key] = CarbonImmutable::createFromTimestamp($property);
-            }
-        }
-
-        return $data;
     }
 }
